@@ -26,12 +26,12 @@ Checked items are complete; unchecked items are the plan for future passes.
 - [x] Unit tests (scanner, index LWW, meta log, hashing, auth, API)
 - [ ] Read-only FUSE mount showing local files (pyfuse3)
 
-## Phase 1 — two nodes, reads
+## Phase 1 — two nodes, reads (this pass)
 
-- [ ] Headscale/WireGuard mesh join + peer discovery
-- [ ] Anti-entropy gossip: `GET /v1/index?since=<cursor>` deltas, `POST /v1/index` merge
-- [ ] Fetch-then-open reads across nodes into `/.dfs/cache`
-- [ ] Union namespace served from the merged index
+- [x] Headscale/WireGuard mesh join + peer discovery (`mesh.py`: best-effort `tailscale up` against `DFS_HEADSCALE_URL`, tailnet peer list + `DFS_PEERS` + cached last-known-peers in `peers.py`)
+- [x] Anti-entropy gossip: `GET /v1/index?since=<cursor>` deltas, `POST /v1/index` merge (`gossip.py`; per-peer pull/push cursors over local index sequence numbers, remote-won records appended to the local meta log)
+- [x] Fetch-then-open reads across nodes into `/.dfs/cache` (`fetch.py`: local → cache → holder fetch with BLAKE3 verification; cached copies register as holders and count toward N)
+- [x] Union namespace served from the merged index (`namespace.py`; exposed as `GET /v1/ls`, `GET /v1/stat`, and `GET /v1/file` until the FUSE layer lands)
 
 ## Phase 2 — writes
 
