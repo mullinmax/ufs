@@ -21,6 +21,7 @@ class Config:
         p.strip() for p in os.environ.get("DFS_PEERS", "").split(",") if p.strip()
     ])
     gossip_interval: float = field(default_factory=lambda: float(os.environ.get("DFS_GOSSIP_INTERVAL", "30")))
+    reconcile_interval: float = field(default_factory=lambda: float(os.environ.get("DFS_RECONCILE_INTERVAL", "60")))
     headscale_url: str = field(default_factory=lambda: os.environ.get("DFS_HEADSCALE_URL", ""))
     headscale_authkey: str = field(default_factory=lambda: os.environ.get("DFS_HEADSCALE_AUTHKEY", ""))
 

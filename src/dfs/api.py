@@ -4,9 +4,14 @@ Phase 0: health, index read, blob read, locate.
 Phase 1: anti-entropy deltas (`GET /v1/index?since=`), gossip merge
 (`POST /v1/index`), union-namespace listing (`GET /v1/ls`), and cross-node
 fetch-then-open reads (`GET /v1/file`).
+Phase 2: writes (`PUT /v1/file`) and replica pushes (`POST /v1/blob`).
 """
 
+import asyncio
+import binascii
+import json
 import shutil
+import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -19,6 +24,13 @@ from .fetch import Fetcher
 from .gossip import merge_delta
 from .index import Index
 from .metalog import MetaLog
+from .writer import (
+    IsolatedWriteError,
+    WriteThresholdError,
+    Writer,
+    decode_record_header,
+    receive_blob,
+)
 from . import namespace
 
 
@@ -33,6 +45,7 @@ def create_app(
     index: Index,
     metalog: MetaLog,
     fetcher: Fetcher | None = None,
+    writer: Writer | None = None,
     lifespan=None,
 ) -> FastAPI:
     app = FastAPI(title="dfs-agent", version=__version__, lifespan=lifespan)
@@ -105,6 +118,48 @@ def create_app(
         except IOError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
         return FileResponse(local, media_type="application/octet-stream")
+
+    async def _buffer_body(request: Request, prefix: str):
+        buffered = config.tmp_dir / f"{prefix}-{uuid.uuid4().hex}"
+        buffered.parent.mkdir(parents=True, exist_ok=True)
+        with buffered.open("wb") as fh:
+            async for chunk in request.stream():
+                fh.write(chunk)
+        return buffered
+
+    @app.put("/v1/file")
+    async def put_file(path: str, request: Request):
+        # Write path (§7): buffer, then commit + replicate to the threshold.
+        if writer is None:
+            raise HTTPException(status_code=503, detail="writer not configured")
+        if not path.startswith("/") or ".." in path.split("/"):
+            raise HTTPException(status_code=400, detail="invalid path")
+        buffered = await _buffer_body(request, "write")
+        try:
+            record = await asyncio.to_thread(writer.write, path, buffered)
+        except IsolatedWriteError:
+            # No-isolated-edits guard: the FUSE layer maps this to EROFS.
+            raise HTTPException(status_code=503, detail="read-only: no peer reachable")
+        except WriteThresholdError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        finally:
+            buffered.unlink(missing_ok=True)
+        return {"record": record.to_dict(), "holders": index.holders(path)}
+
+    @app.post("/v1/blob")
+    async def post_blob(request: Request):
+        # Replication receive: write path pushes and reconciler top-ups.
+        header = request.headers.get("x-dfs-record", "")
+        try:
+            record = decode_record_header(header)
+        except (binascii.Error, json.JSONDecodeError, KeyError, UnicodeDecodeError):
+            raise HTTPException(status_code=400, detail="missing or malformed x-dfs-record")
+        buffered = await _buffer_body(request, "recv")
+        try:
+            await asyncio.to_thread(receive_blob, config, index, metalog, record, buffered)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"stored": True, "node": config.node_id}
 
     @app.get("/v1/blob/{hash_}")
     def get_blob(hash_: str):

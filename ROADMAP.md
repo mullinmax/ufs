@@ -33,13 +33,13 @@ Checked items are complete; unchecked items are the plan for future passes.
 - [x] Fetch-then-open reads across nodes into `/.dfs/cache` (`fetch.py`: local → cache → holder fetch with BLAKE3 verification; cached copies register as holders and count toward N)
 - [x] Union namespace served from the merged index (`namespace.py`; exposed as `GET /v1/ls`, `GET /v1/stat`, and `GET /v1/file` until the FUSE layer lands)
 
-## Phase 2 — writes
+## Phase 2 — writes (this pass)
 
-- [ ] Write path: buffer to `/.dfs/tmp`, hash, version, commit to `/data` + meta log
-- [ ] Write threshold (default 2 synchronous holders), `POST /v1/blob` push
-- [ ] No-isolated-edits guard (`EROFS` when no peer reachable)
-- [ ] Reconciler loop: top up copies to N, capacity-based placement
-- [ ] FUSE write operations (`create`, `write`, `rename`, `truncate`, `fsync`)
+- [x] Write path: buffer to `/.dfs/tmp`, hash, version, commit to `/data` + meta log (`writer.py`; exposed as `PUT /v1/file` until the FUSE layer lands)
+- [x] Write threshold (default 2 synchronous holders), `POST /v1/blob` push
+- [x] No-isolated-edits guard (`EROFS` when no peer reachable; HTTP 503 on `PUT /v1/file`)
+- [x] Reconciler loop: top up copies to N, capacity-based placement (`reconcile.py`: pushes local copies to the reachable non-holder with the most free space)
+- [ ] FUSE write operations (`create`, `write`, `rename`, `truncate`, `fsync`) — blocked on the read-only FUSE mount (Phase 0 leftover)
 
 ## Phase 3 — deletes
 

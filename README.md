@@ -7,7 +7,7 @@ and WebDAV (phones), over a self-hosted WireGuard mesh.
 - **Design:** [docs/DESIGN.md](docs/DESIGN.md)
 - **Roadmap / status:** [ROADMAP.md](ROADMAP.md)
 
-Current state: Phase 1 — multi-node reads. Each agent scans its data
+Current state: Phase 2 — multi-node reads and writes. Each agent scans its data
 directory, hashes files with BLAKE3, and maintains a rebuildable SQLite index
 backed by an append-only JSONL meta log. Nodes discover peers (static
 `DFS_PEERS`, the Headscale/tailscale tailnet, and a cached last-known-peers
@@ -16,6 +16,14 @@ list), exchange index deltas via anti-entropy gossip
 union namespace (`/v1/ls`, `/v1/stat`). Reading a path another node holds
 (`/v1/file`) fetches the blob from a holder into `/.dfs/cache`, verifies its
 hash, and registers the cached copy as a new holder.
+
+Writes (`PUT /v1/file?path=/...`) buffer to `/.dfs/tmp`, hash, assign a new
+version, commit to the data dir and meta log, then push the bytes
+(`POST /v1/blob`) to peers until the write threshold (`DFS_WRITE_THRESHOLD`,
+default 2 distinct holders) is met. If no peer is reachable the write is
+refused (no isolated edits — HTTP 503, the future FUSE layer's `EROFS`). A
+background reconciler (`DFS_RECONCILE_INTERVAL`, default 60s) tops copies up
+to `DFS_N_COPIES` by pushing to the reachable node with the most free space.
 
 ### Two-node quickstart
 
