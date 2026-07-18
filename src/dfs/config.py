@@ -5,6 +5,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+_SIZE_UNITS = {
+    "": 1, "B": 1,
+    "KB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12,
+    "KIB": 2**10, "MIB": 2**20, "GIB": 2**30, "TIB": 2**40,
+}
+
+
+def parse_size(value: str) -> int:
+    """Parse a human size like "4TB", "500GiB", or "1048576" into bytes."""
+    text = value.strip().upper()
+    if not text:
+        return 0
+    number = text.rstrip("KMGTIB ")
+    unit = text[len(number):].strip()
+    if unit not in _SIZE_UNITS:
+        raise ValueError(f"unrecognized size: {value!r}")
+    return int(float(number) * _SIZE_UNITS[unit])
+
+
 @dataclass
 class Config:
     node_id: str = field(default_factory=lambda: os.environ.get("DFS_NODE_ID", "node"))
@@ -24,6 +43,8 @@ class Config:
     reconcile_interval: float = field(default_factory=lambda: float(os.environ.get("DFS_RECONCILE_INTERVAL", "60")))
     headscale_url: str = field(default_factory=lambda: os.environ.get("DFS_HEADSCALE_URL", ""))
     headscale_authkey: str = field(default_factory=lambda: os.environ.get("DFS_HEADSCALE_AUTHKEY", ""))
+    # Cache budget in bytes; 0 or unset = effectively unbounded (design doc §15).
+    cache_size: int = field(default_factory=lambda: parse_size(os.environ.get("DFS_CACHE_SIZE", "0")))
 
     @property
     def meta_dir(self) -> Path:
@@ -52,6 +73,18 @@ class Config:
     @property
     def gossip_cursors_path(self) -> Path:
         return self.control_dir / "gossip_cursors.json"
+
+    @property
+    def node_toml_path(self) -> Path:
+        return self.control_dir / "node.toml"
+
+    @property
+    def pins_path(self) -> Path:
+        return self.control_dir / "pins.json"
+
+    @property
+    def cache_lru_path(self) -> Path:
+        return self.control_dir / "cache_lru.json"
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

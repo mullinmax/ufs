@@ -43,6 +43,14 @@ class Fetcher:
         self.peers = peers
         # Injectable for tests (a TestClient is an httpx.Client).
         self._client_factory = client_factory or _default_client_factory
+        # Called with the logical path whenever a cache copy is served or
+        # created, so the cache manager can keep LRU order (wired in main.py;
+        # kept as a plain callback to avoid a fetch <-> cache import cycle).
+        self.on_cache_access: Callable[[str], None] | None = None
+
+    def _touch(self, path: str) -> None:
+        if self.on_cache_access is not None:
+            self.on_cache_access(path)
 
     def open_path(self, path: str) -> Path:
         """Return a local filesystem path holding the current bytes of `path`."""
@@ -56,6 +64,7 @@ class Fetcher:
 
         cached = self.config.cache_dir / path.lstrip("/")
         if cached.is_file() and cached.stat().st_size == record.size:
+            self._touch(path)
             return cached
 
         for holder in self.index.holders(path):
@@ -70,6 +79,7 @@ class Fetcher:
                 log.warning("fetch of %s from %s (%s) failed: %s", path, holder, url, exc)
                 continue
             self.index.set_holder(path, self.config.node_id)
+            self._touch(path)
             log.info("fetched %s (%d bytes) from %s into cache", path, record.size or 0, holder)
             return cached
 
