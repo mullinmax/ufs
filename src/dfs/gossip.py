@@ -21,6 +21,7 @@ import httpx
 
 from .auth import sign
 from .config import Config
+from .delete import apply_remote_record
 from .index import Index, Record
 from .metalog import MetaLog
 from .peers import PeerStore
@@ -28,15 +29,26 @@ from .peers import PeerStore
 log = logging.getLogger("dfs.gossip")
 
 
-def merge_delta(index: Index, metalog: MetaLog, records: list[dict], holders: list[dict]) -> int:
-    """Merge a gossiped delta into the local index. Returns records accepted."""
+def merge_delta(config: Config, index: Index, metalog: MetaLog,
+                records: list[dict], holders: list[dict]) -> int:
+    """Merge a gossiped delta into the local index. Returns records accepted.
+
+    Every remote record that wins the merge also applies its §10 side
+    effects: a tombstone purges local bytes and holders; a newer live
+    record drops any stale local copy (straggler reconciliation). Holder
+    entries for tombstoned paths are stale gossip and are skipped.
+    """
     accepted = 0
     for obj in records:
         record = Record.from_dict(obj)
         if index.upsert(record):
             metalog.append(record)
+            apply_remote_record(config, index, record)
             accepted += 1
     for entry in holders:
+        current = index.get(entry["path"])
+        if current is not None and current.state == "tombstone":
+            continue
         index.set_holder(entry["path"], entry["node"])
     return accepted
 
@@ -88,7 +100,8 @@ class Gossip:
             )
             resp.raise_for_status()
             data = resp.json()
-            accepted = merge_delta(self.index, self.metalog, data["records"], data["holders"])
+            accepted = merge_delta(self.config, self.index, self.metalog,
+                                   data["records"], data["holders"])
             cursors["pull"] = data["cursor"]
             if peer_node := data.get("node"):
                 self.peers.note_node(url, peer_node)

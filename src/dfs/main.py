@@ -10,6 +10,7 @@ import uvicorn
 from . import __version__
 from .api import create_app
 from .config import Config
+from .delete import Deleter
 from .fetch import Fetcher
 from .gossip import Gossip
 from .index import Index
@@ -41,6 +42,7 @@ def main() -> None:
 
     fetcher = Fetcher(config, index, peers)
     writer = Writer(config, index, metalog, peers)
+    deleter = Deleter(config, index, metalog, writer)
     gossip = Gossip(config, index, metalog, peers)
     reconciler = Reconciler(config, index, writer, peers)
 
@@ -57,7 +59,8 @@ def main() -> None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-    app = create_app(config, index, metalog, fetcher=fetcher, writer=writer, lifespan=lifespan)
+    app = create_app(config, index, metalog, fetcher=fetcher, writer=writer,
+                     deleter=deleter, lifespan=lifespan)
     uvicorn.run(app, host=config.listen_host, port=config.listen_port)
 
 

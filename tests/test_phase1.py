@@ -69,12 +69,12 @@ def test_index_migrates_pre_seq_schema(tmp_path: Path):
 def test_merge_delta_appends_winners_to_metalog(tmp_path: Path):
     cfg, index, metalog = make_node(tmp_path, "a")
     rec = Record(path="/f", lamport=3, node="b", state="live", hash="blake3:f", size=1)
-    accepted = merge_delta(index, metalog, [rec.to_dict()], [{"path": "/f", "node": "b"}])
+    accepted = merge_delta(cfg, index, metalog, [rec.to_dict()], [{"path": "/f", "node": "b"}])
     assert accepted == 1
     assert index.holders("/f") == ["b"]
     assert list(metalog.read_all()) == [rec]
     # Re-merging the same delta is a no-op (no duplicate metalog lines).
-    assert merge_delta(index, metalog, [rec.to_dict()], []) == 0
+    assert merge_delta(cfg, index, metalog, [rec.to_dict()], []) == 0
     assert len(list(metalog.read_all())) == 1
 
 
@@ -142,7 +142,7 @@ def test_fetch_then_open(tmp_path: Path):
     cfg_b, index_b, metalog_b = make_node(tmp_path, "b")
     # b's index knows the record and holder (as if gossiped).
     delta = index_a.changes_since(0)
-    merge_delta(index_b, metalog_b, [r.to_dict() for r in delta[0]], delta[1])
+    merge_delta(cfg_b, index_b, metalog_b, [r.to_dict() for r in delta[0]], delta[1])
 
     peers_b = PeerStore(cfg_b.peers_path, static_peers=["http://node-a"])
     peers_b.note_node("http://node-a", "a")
@@ -238,7 +238,7 @@ def test_file_endpoint_fetches_across_nodes(tmp_path: Path):
 
     cfg_b, index_b, metalog_b = make_node(tmp_path, "b")
     delta = index_a.changes_since(0)
-    merge_delta(index_b, metalog_b, [r.to_dict() for r in delta[0]], delta[1])
+    merge_delta(cfg_b, index_b, metalog_b, [r.to_dict() for r in delta[0]], delta[1])
     peers_b = PeerStore(cfg_b.peers_path)
     peers_b.note_node("http://node-a", "a")
     fetcher_b = Fetcher(cfg_b, index_b, peers_b, client_factory=lambda url: TestClient(app_a))

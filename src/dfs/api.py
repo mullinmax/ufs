@@ -5,6 +5,8 @@ Phase 1: anti-entropy deltas (`GET /v1/index?since=`), gossip merge
 (`POST /v1/index`), union-namespace listing (`GET /v1/ls`), and cross-node
 fetch-then-open reads (`GET /v1/file`).
 Phase 2: writes (`PUT /v1/file`) and replica pushes (`POST /v1/blob`).
+Phase 3: deletes (`DELETE /v1/file` writes a tombstone; gossiped tombstones
+purge bytes on every holder).
 """
 
 import asyncio
@@ -20,6 +22,7 @@ from pydantic import BaseModel
 from . import __version__
 from .auth import verify
 from .config import Config
+from .delete import Deleter
 from .fetch import Fetcher
 from .gossip import merge_delta
 from .index import Index
@@ -46,6 +49,7 @@ def create_app(
     metalog: MetaLog,
     fetcher: Fetcher | None = None,
     writer: Writer | None = None,
+    deleter: Deleter | None = None,
     lifespan=None,
 ) -> FastAPI:
     app = FastAPI(title="dfs-agent", version=__version__, lifespan=lifespan)
@@ -82,7 +86,7 @@ def create_app(
 
     @app.post("/v1/index")
     def post_index(delta: IndexDelta):
-        accepted = merge_delta(index, metalog, delta.records, delta.holders)
+        accepted = merge_delta(config, index, metalog, delta.records, delta.holders)
         return {"accepted": accepted}
 
     @app.get("/v1/locate")
@@ -145,6 +149,21 @@ def create_app(
         finally:
             buffered.unlink(missing_ok=True)
         return {"record": record.to_dict(), "holders": index.holders(path)}
+
+    @app.delete("/v1/file")
+    async def delete_file(path: str):
+        # Delete path (§10): tombstone, purge local bytes, notify peers.
+        if deleter is None:
+            raise HTTPException(status_code=503, detail="deleter not configured")
+        try:
+            tombstone = await asyncio.to_thread(deleter.delete, path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="path not found")
+        except IsolatedWriteError:
+            raise HTTPException(status_code=503, detail="read-only: no peer reachable")
+        except WriteThresholdError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return {"record": tombstone.to_dict()}
 
     @app.post("/v1/blob")
     async def post_blob(request: Request):
