@@ -16,7 +16,9 @@ from .index import Index
 from .mesh import join_mesh, discover_peers
 from .metalog import MetaLog
 from .peers import PeerStore
+from .reconcile import Reconciler
 from .scanner import scan
+from .writer import Writer
 
 log = logging.getLogger("dfs")
 
@@ -38,19 +40,24 @@ def main() -> None:
     log.info("known peers: %s", ", ".join(peers.urls()) or "(none)")
 
     fetcher = Fetcher(config, index, peers)
+    writer = Writer(config, index, metalog, peers)
     gossip = Gossip(config, index, metalog, peers)
+    reconciler = Reconciler(config, index, writer, peers)
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
-        task = asyncio.create_task(gossip.run())
+        tasks = [asyncio.create_task(gossip.run()),
+                 asyncio.create_task(reconciler.run())]
         try:
             yield
         finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
-    app = create_app(config, index, metalog, fetcher=fetcher, lifespan=lifespan)
+    app = create_app(config, index, metalog, fetcher=fetcher, writer=writer, lifespan=lifespan)
     uvicorn.run(app, host=config.listen_host, port=config.listen_port)
 
 
