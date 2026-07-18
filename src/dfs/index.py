@@ -197,6 +197,12 @@ class Index:
             self._conn.commit()
             return True
 
+    def clear_holders(self, path: str) -> None:
+        """Forget every holder of a path (a tombstone won: nobody holds it)."""
+        with self._lock:
+            self._conn.execute("DELETE FROM holders WHERE path = ?", (path,))
+            self._conn.commit()
+
     def holders(self, path: str) -> list[str]:
         with self._lock:
             rows = self._conn.execute(

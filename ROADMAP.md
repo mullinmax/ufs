@@ -41,12 +41,12 @@ Checked items are complete; unchecked items are the plan for future passes.
 - [x] Reconciler loop: top up copies to N, capacity-based placement (`reconcile.py`: pushes local copies to the reachable non-holder with the most free space)
 - [ ] FUSE write operations (`create`, `write`, `rename`, `truncate`, `fsync`) — blocked on the read-only FUSE mount (Phase 0 leftover)
 
-## Phase 3 — deletes
+## Phase 3 — deletes (this pass)
 
-- [ ] Tombstone records on delete (kept forever)
-- [ ] Tombstone propagation: higher-versioned tombstone purges local bytes
-- [ ] Delete-then-identical-re-add correctness
-- [ ] Straggler reconciliation on rejoin
+- [x] Tombstone records on delete (kept forever) (`delete.py`: `DELETE /v1/file` writes a `state: "tombstone"` record at `lamport++`, appends it to the meta log, purges local bytes; same no-isolated-edits guard as writes, plus eager best-effort tombstone push to reachable peers)
+- [x] Tombstone propagation: higher-versioned tombstone purges local bytes (`apply_remote_record`, applied on every gossip merge; stale holder gossip for tombstoned paths is skipped)
+- [x] Delete-then-identical-re-add correctness (re-add is a new higher version; a tombstone only suppresses versions at or below its own — content irrelevant)
+- [x] Straggler reconciliation on rejoin (rescan re-registers stale files at their old version from the meta log; the gossiped tombstone or newer live record then purges/drops the stale copy and holder claim)
 
 ## Phase 4 — cache and pins
 
