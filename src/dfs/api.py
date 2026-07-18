@@ -7,6 +7,8 @@ fetch-then-open reads (`GET /v1/file`).
 Phase 2: writes (`PUT /v1/file`) and replica pushes (`POST /v1/blob`).
 Phase 3: deletes (`DELETE /v1/file` writes a tombstone; gossiped tombstones
 purge bytes on every holder).
+Phase 4: pins (`GET/POST/DELETE /v1/pin`; pinned prefixes are warmed up and
+never evicted by the cache loop).
 """
 
 import asyncio
@@ -27,6 +29,7 @@ from .fetch import Fetcher
 from .gossip import merge_delta
 from .index import Index
 from .metalog import MetaLog
+from .pins import PinConflictError, PinStore
 from .writer import (
     IsolatedWriteError,
     WriteThresholdError,
@@ -50,6 +53,7 @@ def create_app(
     fetcher: Fetcher | None = None,
     writer: Writer | None = None,
     deleter: Deleter | None = None,
+    pins: PinStore | None = None,
     lifespan=None,
 ) -> FastAPI:
     app = FastAPI(title="dfs-agent", version=__version__, lifespan=lifespan)
@@ -164,6 +168,38 @@ def create_app(
         except WriteThresholdError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
         return {"record": tombstone.to_dict()}
+
+    @app.get("/v1/pin")
+    def list_pins():
+        if pins is None:
+            raise HTTPException(status_code=503, detail="pins not configured")
+        return {"pins": pins.prefixes()}
+
+    @app.post("/v1/pin")
+    def add_pin(prefix: str):
+        # Pin a prefix on this node (§11); the cache loop warms it up next round.
+        if pins is None:
+            raise HTTPException(status_code=503, detail="pins not configured")
+        try:
+            added = pins.add(prefix)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"added": added, "pins": pins.prefixes()}
+
+    @app.delete("/v1/pin")
+    def remove_pin(prefix: str):
+        if pins is None:
+            raise HTTPException(status_code=503, detail="pins not configured")
+        try:
+            pins.remove(prefix)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="prefix not pinned")
+        except PinConflictError:
+            raise HTTPException(
+                status_code=409, detail="pin is managed by node.toml; edit that file")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"pins": pins.prefixes()}
 
     @app.post("/v1/blob")
     async def post_blob(request: Request):

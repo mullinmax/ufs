@@ -48,12 +48,12 @@ Checked items are complete; unchecked items are the plan for future passes.
 - [x] Delete-then-identical-re-add correctness (re-add is a new higher version; a tombstone only suppresses versions at or below its own — content irrelevant)
 - [x] Straggler reconciliation on rejoin (rescan re-registers stale files at their old version from the meta log; the gossiped tombstone or newer live record then purges/drops the stale copy and holder claim)
 
-## Phase 4 — cache and pins
+## Phase 4 — cache and pins (this pass)
 
-- [ ] Redundancy-aware LRU eviction (never drop below N global holders)
-- [ ] Pinning via `node.toml` (`[[pin]] prefix = ...`), proactive warmup, never evict
-- [ ] `POST /v1/pin` / `DELETE /v1/pin` endpoints
-- [ ] `DFS_CACHE_SIZE` enforcement
+- [x] Redundancy-aware LRU eviction (never drop below N global holders) (`cache.py`: LRU order from `cache_lru.json` touched on every cache hit/fetch; stale/tombstoned/`data`-shadowed entries always evictable, load-bearing copies never)
+- [x] Pinning via `node.toml` (`[[pin]] prefix = ...`), proactive warmup, never evict (`pins.py` + `CacheManager.warm_pins`, run each cache round)
+- [x] `POST /v1/pin` / `DELETE /v1/pin` endpoints (plus `GET /v1/pin`; API pins persist to `pins.json`, `node.toml` pins are operator-managed and return 409 on API delete)
+- [x] `DFS_CACHE_SIZE` enforcement (human-readable sizes, e.g. `4TB`; `0`/unset = unbounded; evictions release the holder claim so the index stays truthful)
 
 ## Phase 5 — phones
 

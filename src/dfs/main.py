@@ -9,6 +9,7 @@ import uvicorn
 
 from . import __version__
 from .api import create_app
+from .cache import CacheManager
 from .config import Config
 from .delete import Deleter
 from .fetch import Fetcher
@@ -17,6 +18,7 @@ from .index import Index
 from .mesh import join_mesh, discover_peers
 from .metalog import MetaLog
 from .peers import PeerStore
+from .pins import PinStore
 from .reconcile import Reconciler
 from .scanner import scan
 from .writer import Writer
@@ -45,11 +47,15 @@ def main() -> None:
     deleter = Deleter(config, index, metalog, writer)
     gossip = Gossip(config, index, metalog, peers)
     reconciler = Reconciler(config, index, writer, peers)
+    pins = PinStore(config)
+    cache = CacheManager(config, index, pins)
+    fetcher.on_cache_access = cache.record_access
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
         tasks = [asyncio.create_task(gossip.run()),
-                 asyncio.create_task(reconciler.run())]
+                 asyncio.create_task(reconciler.run()),
+                 asyncio.create_task(cache.run(fetcher))]
         try:
             yield
         finally:
@@ -60,7 +66,7 @@ def main() -> None:
                     await task
 
     app = create_app(config, index, metalog, fetcher=fetcher, writer=writer,
-                     deleter=deleter, lifespan=lifespan)
+                     deleter=deleter, pins=pins, lifespan=lifespan)
     uvicorn.run(app, host=config.listen_host, port=config.listen_port)
 
 
